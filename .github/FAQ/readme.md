@@ -8,7 +8,7 @@
 There are some error codes you might get in return when attempting to use the answer hack. Here are a few of those listed to go ahead and help before you make an issue!
 
 * **HTTP Error : 403 - Forbidden** ~ The quiz you are attempting to acces using the quiz ID is most likely private. Try again and see if you get the same responce.
-* **HTTP Error :400 - Bad Request** ~ You will see this when you type the quiz ID incorrectly. Try re-typing it.
+* **HTTP Error :400 - Bad Request** ~ You will see this when you type the quiz ID incorrectly. Try re-typing it. (Don't enter the GAME PIN)
 * **HTTP Error :404 - Not found** ~ The quiz you are attempting to get answer from does not exist.
   
 ## Bot
