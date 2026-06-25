@@ -1,7 +1,7 @@
 readline = require('readline-sync');
 const Kahoot = require("kahoot.js-latest");
 var words = require('an-array-of-english-words')
-const request = require('request');
+
 var random = require('random-name')
 var setTitle = require('console-title');
 setTitle('flood.js');
