@@ -13,25 +13,30 @@ function getRandomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function getName() {
-  ran = getRandomInt(1, 5)
-  if (ran == 5) {
-    request('https://apis.kahoot.it/namerator', function(error, response, body) {
-      if (error) { console.log(error); }
-      return JSON.parse(body).name
-    });
-  }
-  if (ran == 4) {
-    return words[getRandomInt(1, words.length)]
-  }
-  if (ran == 3) {
-    return (random.first())
+function getName(botIndex) {
+  ran = (nameStyle >= 1 && nameStyle <= 4) ? nameStyle : getRandomInt(1, 3)
+  if (ran == 1) {
+    return (random.first() + ' ' + random.last())
   }
   if (ran == 2) {
-    return (random.first() + random.middle() + random.last())
+    return random.first()
   }
-  if (ran == 1) {
-    return (random.first() + random.last())
+  if (ran == 3) {
+    var count = getRandomInt(1, 4)
+    var selected = []
+    for (var i = 0; i < count; i++) {
+      var word = words[getRandomInt(0, words.length - 1)]
+      if (word && word.length > 0) {
+        selected.push(word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      }
+    }
+    if (selected.length > 0) {
+      return selected.join(' ')
+    }
+    return random.first()
+  }
+  if (ran == 4) {
+    return nameStylePrefix + botIndex
   }
 }
 
@@ -125,6 +130,9 @@ if (answerdelay == "" || isNaN(answerdelay) || answerdelay < 1 || answerdelay > 
   console.log("Answer delay set to: " + answerdelay + "ms");
 }
 
+nameStyle = 5
+nameStylePrefix = 'Bot'
+
 if (antibotmode == "y") {
   ranname = true
   er = "n"
@@ -133,6 +141,21 @@ if (antibotmode == "y") {
 
   if (ranname == "y") {
     ranname = true
+    console.log('')
+    console.log('Select name style:')
+    console.log('  1) First + Last name')
+    console.log('  2) First name only')
+    console.log('  3) Random dictionary words (1-4 words)')
+    console.log('  4) Custom prefix + number (e.g. Bot1, Bot2...)')
+    console.log('  5) All (random mix) [default]')
+    styleInput = readline.question('Enter choice (1-5) --> ')
+    styleParsed = parseInt(styleInput)
+    if (styleParsed >= 1 && styleParsed <= 5) {
+      nameStyle = styleParsed
+    }
+    if (nameStyle == 4) {
+      nameStylePrefix = readline.question('Enter name prefix --> ') || 'Bot'
+    }
   } else {
     ranname = false
     botname = readline.question('Enter name --> ');
@@ -157,7 +180,7 @@ repeattimes = 0
 
 function sendjoin(name, id) {
   if (ranname) {
-    join(getName(), id)
+    join(getName(id), id)
   } else {
     join(name, id)
   }
