@@ -136,66 +136,39 @@ function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// Enhanced name generation with better error handling and validation
-function getName() {
-    const maxAttempts = 5;
-    
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-            const method = getRandomInt(1, 5);
-            let name = null;
-            
-            switch (method) {
-                case 1:
-                    // Random first + last name
-                    name = `${random.first()}${random.last()}`;
-                    break;
-                    
-                case 2:
-                    // Random first + middle + last name
-                    name = `${random.first()}${random.middle()}${random.last()}`;
-                    break;
-                    
-                case 3:
-                    // Random first name only
-                    name = random.first();
-                    break;
-                    
-                case 4:
-                    // Random word from dictionary
-                    if (words && words.length > 0) {
+// Name generation with selectable styles
+function getName(style, botIndex) {
+    const method = (style >= 1 && style <= 4) ? style : getRandomInt(1, 3);
+
+    try {
+        switch (method) {
+            case 1:
+                return `${random.first()} ${random.last()}`;
+            case 2:
+                return random.first();
+            case 3:
+                if (words && words.length > 0) {
+                    const count = getRandomInt(1, 4);
+                    const selectedWords = [];
+                    for (let i = 0; i < count; i++) {
                         const word = words[getRandomInt(0, words.length - 1)];
-                        if (word && word.length > 0 && word.length <= 15) {
-                            name = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+                        if (word && word.length > 0) {
+                            selectedWords.push(word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
                         }
                     }
-                    break;
-                    
-                case 5:
-                    // Kahoot-style name with prefix
-                    name = `Bot${random.first()}${getRandomInt(10, 99)}`;
-                    break;
-            }
-            
-            // Validate and clean the name
-            if (name && typeof name === 'string' && name.trim().length > 0) {
-                // Clean the name: remove special characters, limit length
-                name = name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 15);
-                
-                if (name.length >= 2) {
-                    return name;
+                    if (selectedWords.length > 0) {
+                        return selectedWords.join(' ');
+                    }
                 }
-            }
-            
-        } catch (error) {
-            console.log(`Name generation attempt ${attempt + 1} failed: ${error.message}`);
+                return random.first();
+            case 4:
+                return `${config.nameStylePrefix}${botIndex}`;
         }
+    } catch (error) {
+        console.log(`Name generation failed: ${error.message}`);
     }
-    
-    // Fallback name if all attempts fail
-    const fallbackName = `Bot${getRandomInt(100, 999)}`;
-    console.log(`Using fallback name: ${fallbackName}`);
-    return fallbackName;
+
+    return `Bot${getRandomInt(100, 999)}`;
 }
 
 // Enhanced array shuffling with validation
@@ -330,8 +303,26 @@ try {
             'Please enter "y" for yes or "n" for no.'
         );
         config.ranname = rannameInput ? rannameInput.toLowerCase() === 'y' : true;
-        
-        if (!config.ranname) {
+
+        if (config.ranname) {
+            console.log('');
+            console.log('Select name style:');
+            console.log('  1) First + Last name');
+            console.log('  2) First name only');
+            console.log('  3) Random dictionary words (1-4 words)');
+            console.log('  4) Custom prefix + number (e.g. Bot1, Bot2...)');
+            console.log('  5) All (random mix) [default]');
+            const styleInput = readline.question('Enter choice (1-5)> ');
+            const styleParsed = parseInt(styleInput);
+            if (styleParsed >= 1 && styleParsed <= 5) {
+                config.nameStyle = styleParsed;
+            } else {
+                config.nameStyle = 5;
+            }
+            if (config.nameStyle === 4) {
+                config.nameStylePrefix = readline.question('Enter name prefix> ') || 'Bot';
+            }
+        } else {
             config.botname = readline.question('Enter bot name prefix = ') || 'Bot';
         }
         
@@ -343,6 +334,7 @@ try {
         config.nameBypass = bypassInput ? bypassInput.toLowerCase() === 'y' : false;
     } else {
         config.ranname = true;
+        config.nameStyle = 5;
         config.nameBypass = false;
     }
     
@@ -372,6 +364,10 @@ try {
     console.log(`Number of bots: ${config.bots}`);
     console.log(`Anti-bot mode: ${config.antibotMode ? 'Enabled' : 'Disabled'}`);
     console.log(`Random names: ${config.ranname ? 'Enabled' : 'Disabled'}`);
+    if (config.ranname) {
+        const styleNames = { 1: 'First + Last', 2: 'First name only', 3: 'Dictionary words', 4: `Prefix (${config.nameStylePrefix})`, 5: 'All (random mix)' };
+        console.log(`Name style: ${styleNames[config.nameStyle] || 'All (random mix)'}`);
+    }
     console.log(`Name bypass: ${config.nameBypass ? 'Enabled' : 'Disabled'}`);
     console.log(`User control: ${config.userControlled ? 'Enabled' : 'Disabled'}`);
     console.log(`Beep notifications: ${config.beepEnabled ? 'Enabled' : 'Disabled'}`);
@@ -398,6 +394,7 @@ try {
         pin: '123456',
         bots: 10,
         ranname: true,
+        nameStyle: 5,
         nameBypass: false,
         userControlled: false,
         beepEnabled: false
@@ -438,14 +435,7 @@ function sendjoin(name, id) {
     let botName;
     
     if (config.ranname) {
-        botName = getName();
-        // Ensure we have a valid name
-        let attempts = 0;
-        while ((!botName || botName.length === 0) && attempts < 3) {
-            botName = getName();
-            attempts++;
-        }
-        
+        botName = getName(config.nameStyle, id);
         if (!botName || botName.length === 0) {
             botName = `FallbackBot${id}`;
         }
