@@ -49,6 +49,16 @@ from colorama import Fore, Style
 from pystyle import Write, System, Colors, Colorate, Anime
 from datetime import datetime
 
+UUID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+def extract_uuid(value):
+    """Return a Kahoot UUID from raw input or a shared Kahoot URL."""
+    value = (value or "").strip()
+    match = UUID_PATTERN.search(value)
+    return match.group(0) if match else value
+
 # Colors :D
 red = Fore.RED
 yellow = Fore.YELLOW
@@ -117,15 +127,16 @@ api = "https://play.kahoot.it/rest/kahoots/"
 
 class Kahoot:
     def __init__(self, uuid):
-        self.uuid = uuid
+        self.uuid = extract_uuid(uuid)
         self.rate_limiter = RateLimiter()
         self.ssl_context = SSLContextManager.create_ssl_context()
         
         try:
-            if not re.fullmatch(r"^[A-Za-z0-9-]*$", uuid):
+            if not UUID_PATTERN.fullmatch(self.uuid):
+                print("Error: Invalid Quiz ID format. Paste a Kahoot share/details URL or UUID, not a live game PIN.")
                 self.data = False
             else:
-                self.data = self._fetch_quiz_data(uuid)
+                self.data = self._fetch_quiz_data(self.uuid)
         except HTTPError or InvalidURL:
             self.data = False
 
@@ -165,6 +176,12 @@ class Kahoot:
                     return load(response)
                     
             except HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+
                 if e.code == 403:
                     print(f"Attempt {attempt + 1}: Access forbidden (403)")
                     if attempt < max_retries - 1:
@@ -178,6 +195,17 @@ class Kahoot:
                 
                 elif e.code == 404:
                     print("Error: Quiz not found. Please verify the Quiz ID is correct.")
+                    return False
+
+                elif e.code == 400:
+                    detail = "Bad request. Kahoot rejected the ID format."
+                    try:
+                        payload = json.loads(body)
+                        detail = payload.get("fields", {}).get("arg1") or payload.get("error") or detail
+                    except Exception:
+                        pass
+                    print(f"HTTP Error 400: {detail}")
+                    print("Tip: use the UUID from a Kahoot share/details URL. A live game PIN is not a Quiz ID.")
                     return False
                 
                 elif e.code == 429:  # Too Many Requests

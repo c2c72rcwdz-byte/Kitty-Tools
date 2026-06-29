@@ -2,9 +2,20 @@
 
 import json
 import urllib.request
+import urllib.error
 import os
+import re
 from os import system
 import platform
+
+UUID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+def extract_uuid(value):
+    value = (value or "").strip()
+    match = UUID_PATTERN.search(value)
+    return match.group(0) if match else value
 
 print(f"'{system}'") # OS Alert
 
@@ -19,7 +30,8 @@ print("""
 """)
 api = 'https://play.kahoot.it/rest/kahoots/'
 usrinput = input(f" Enter ID >> ")
-link = api + usrinput
+quiz_id = extract_uuid(usrinput)
+link = api + quiz_id
 finished = False
 
 answers = {}
@@ -27,6 +39,9 @@ images = {}
 questions = {}
 
 try:
+    if not UUID_PATTERN.fullmatch(quiz_id):
+        raise ValueError("Invalid Quiz ID format. Paste a Kahoot share/details URL or UUID, not a live game PIN.")
+
     with urllib.request.urlopen(link) as url:
         print("")
         data = json.load(url)
@@ -103,6 +118,15 @@ try:
 
                 question += 1
 
+except urllib.error.HTTPError as err:
+    os.system('clear')
+    print("Womp Womp! ")
+    print("There was an error!  Mabey you typed the 'Quiz ID' incorrectly!\n")
+    try:
+        body = err.read().decode("utf-8", errors="replace")
+        print(f"HTTP {err.code}: {body}")
+    except Exception:
+        print(err)
 except Exception as err:
     os.system('clear')
     print("Womp Womp! ")
@@ -123,7 +147,7 @@ print_answers()
 if finished:
     # try:
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    data_path = os.path.join(dir_path, "quizzes", f"{usrinput}.json")
+    data_path = os.path.join(dir_path, "quizzes", f"{quiz_id}.json")
 
     if not os.path.exists(os.path.join(dir_path, "quizzes")):
         os.mkdir(os.path.join(dir_path, "quizzes"), 0o666)

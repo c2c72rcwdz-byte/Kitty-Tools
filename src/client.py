@@ -43,6 +43,16 @@ check_and_install_dependencies()
 from colorama import Fore, Style
 from pystyle import Write, System, Colors, Colorate, Anime
 
+UUID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+def extract_uuid(value):
+    """Return a Kahoot UUID from raw input or a shared Kahoot URL."""
+    value = (value or "").strip()
+    match = UUID_PATTERN.search(value)
+    return match.group(0) if match else value
+
 class ColorScheme:
     RED = Fore.RED
     YELLOW = Fore.YELLOW
@@ -191,6 +201,12 @@ class KahootAPI:
                     return json.loads(response.read().decode('utf-8'))
                     
             except HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+
                 if e.code == 403:
                     print(f"Attempt {attempt + 1}: Access forbidden (403)")
                     if attempt < max_retries - 1:
@@ -203,6 +219,15 @@ class KahootAPI:
                 
                 elif e.code == 404:
                     return {'error': 'Quiz not found. The ID may be incorrect.'}
+
+                elif e.code == 400:
+                    detail = "Bad request. Kahoot rejected the ID or PIN format."
+                    try:
+                        payload = json.loads(body)
+                        detail = payload.get("fields", {}).get("arg1") or payload.get("error") or detail
+                    except Exception:
+                        pass
+                    return {'error': f'HTTP 400: {detail}'}
                 
                 elif e.code == 429:  # Too Many Requests
                     if attempt < max_retries - 1:
@@ -244,8 +269,16 @@ class KahootAPI:
     
     @staticmethod
     def get_quiz_by_id(quiz_id):
-        if not re.fullmatch(r"^[A-Za-z0-9-]*$", quiz_id):
-            return {'error': 'Invalid quiz ID format'}
+        quiz_id = extract_uuid(quiz_id)
+
+        if not UUID_PATTERN.fullmatch(quiz_id):
+            return {
+                'error': (
+                    'Invalid Quiz ID format. Use the UUID from a Kahoot share/details URL, '
+                    'for example 465ccb62-0679-4011-9f99-7471f217f4e9. '
+                    'A live game PIN is not the same as a Quiz ID.'
+                )
+            }
         
         api = KahootAPI()
         url = f"{api.BASE_API_URL}{quiz_id}"
@@ -264,8 +297,14 @@ class KahootAPI:
             return {'quiz_id': result['id']}
         elif 'error' not in result:
             return {'error': 'No quiz ID found in response'}
-        
-        return result
+
+        return {
+            'error': (
+                f"{result['error']} This lookup only works for Kahoot challenge/assignment PINs. "
+                "Live game PINs usually cannot be converted to a Quiz ID by this endpoint; "
+                "use the quiz share/details URL or UUID instead."
+            )
+        }
 
 class KahootQuiz:    
     def __init__(self, quiz_data):
@@ -475,10 +514,11 @@ class KahootClientUI:
                     time.sleep(1)
                     return quiz_id
             else:
-                if re.fullmatch(r"^[A-Za-z0-9-]*$", user_input):
-                    return user_input
+                quiz_id = extract_uuid(user_input)
+                if UUID_PATTERN.fullmatch(quiz_id):
+                    return quiz_id
                 else:
-                    print(f"{ColorScheme.RED}Invalid quiz ID format. It should contain only letters, numbers, and hyphens.")
+                    print(f"{ColorScheme.RED}Invalid quiz ID format. Paste a Kahoot share/details URL or a UUID, not a live game PIN.")
                     retry = input(f"{ColorScheme.YELLOW}Try again? (y/n): {ColorScheme.RESET}").lower()
                     if retry != 'y':
                         return None
@@ -499,25 +539,42 @@ class KahootClientUI:
         print(f"{ColorScheme.CYAN}====================================\n")
         
         output_lock = threading.Lock()
+        displayed_blocks = 0
         
         for i in range(kahoot.get_quiz_length()):
-            question_details = kahoot.get_question_details(i)
-            
-            with output_lock:
-                if question_details["type"] == "content":
-                    print(f"{ColorScheme.YELLOW}SLIDE {i+1}: {question_details['title']}")
-                    if question_details.get('description'):
-                        print(f"{ColorScheme.GRAY}Description: {question_details['description']}{ColorScheme.RESET}\n")
-                else:
-                    print(f"{ColorScheme.PRETTY}{ColorScheme.ORANGE}[{ColorScheme.RESET}Question {i+1}{ColorScheme.ORANGE}]{ColorScheme.GREEN}--{ColorScheme.ORANGE}[{ColorScheme.RESET}{question_details['question']}{ColorScheme.ORANGE}]{ColorScheme.RESET}")
-                    
-                    answers = kahoot.get_answer(i)
-                    if answers:
-                        print(f"{ColorScheme.PRETTY}{ColorScheme.ORANGE}[{ColorScheme.RESET}Answer{ColorScheme.ORANGE}]{ColorScheme.GREEN}--{ColorScheme.ORANGE}[{ColorScheme.RESET}{', '.join(answers)}{ColorScheme.ORANGE}]{ColorScheme.RESET}\n")
+            try:
+                question_details = kahoot.get_question_details(i)
+
+                if not question_details:
+                    with output_lock:
+                        print(f"{ColorScheme.YELLOW}BLOCK {i+1}: Could not read this question block.{ColorScheme.RESET}\n")
+                    displayed_blocks += 1
+                    continue
+                
+                with output_lock:
+                    if question_details["type"] == "content":
+                        print(f"{ColorScheme.YELLOW}SLIDE {i+1}: {question_details['title']}")
+                        if question_details.get('description'):
+                            print(f"{ColorScheme.GRAY}Description: {question_details['description']}{ColorScheme.RESET}")
+                        print("")
                     else:
-                        print(f"{ColorScheme.PRETTY}{ColorScheme.ORANGE}[{ColorScheme.RESET}Answer{ColorScheme.ORANGE}]{ColorScheme.GREEN}--{ColorScheme.ORANGE}[{ColorScheme.RESET}No correct answers found{ColorScheme.ORANGE}]{ColorScheme.RESET}\n")
+                        print(f"{ColorScheme.PRETTY}{ColorScheme.ORANGE}[{ColorScheme.RESET}Question {i+1}{ColorScheme.ORANGE}]{ColorScheme.GREEN}--{ColorScheme.ORANGE}[{ColorScheme.RESET}{question_details['question']}{ColorScheme.ORANGE}]{ColorScheme.RESET}")
+                        
+                        answers = kahoot.get_answer(i)
+                        if answers:
+                            print(f"{ColorScheme.PRETTY}{ColorScheme.ORANGE}[{ColorScheme.RESET}Answer{ColorScheme.ORANGE}]{ColorScheme.GREEN}--{ColorScheme.ORANGE}[{ColorScheme.RESET}{', '.join(answers)}{ColorScheme.ORANGE}]{ColorScheme.RESET}\n")
+                        else:
+                            print(f"{ColorScheme.PRETTY}{ColorScheme.ORANGE}[{ColorScheme.RESET}Answer{ColorScheme.ORANGE}]{ColorScheme.GREEN}--{ColorScheme.ORANGE}[{ColorScheme.RESET}No correct answers found{ColorScheme.ORANGE}]{ColorScheme.RESET}\n")
+
+                displayed_blocks += 1
+            except Exception as err:
+                with output_lock:
+                    print(f"{ColorScheme.RED}BLOCK {i+1}: Failed to process this question: {err}{ColorScheme.RESET}\n")
+                displayed_blocks += 1
             
             time.sleep(0.010)
+
+        print(f"{ColorScheme.CYAN}Displayed {displayed_blocks} of {kahoot.get_quiz_length()} blocks returned by Kahoot.{ColorScheme.RESET}")
     
     @staticmethod
     def display_options(kahoot):

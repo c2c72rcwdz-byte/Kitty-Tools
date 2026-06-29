@@ -12,6 +12,7 @@ import urllib.error
 from urllib.parse import urlparse
 from datetime import datetime
 from functools import partial
+import re
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QLineEdit, QTabWidget, QTextEdit, 
@@ -20,6 +21,15 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QHeaderView, QComboBox, QFileDialog, QCheckBox, QGroupBox, QStackedWidget)
 from PyQt5.QtCore import (Qt, QThread, pyqtSignal, QSize, QTimer, QRect)
 from PyQt5.QtGui import (QFont, QColor, QPalette, QIcon, QPainter)
+
+UUID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+def extract_uuid(value):
+    value = (value or "").strip()
+    match = UUID_PATTERN.search(value)
+    return match.group(0) if match else value
 
 class ThemeEngine:
     class Colors:
@@ -322,6 +332,15 @@ class KahootAPI:
     @staticmethod
     def get_quiz_by_id(quiz_id):
         try:
+            quiz_id = extract_uuid(quiz_id)
+            if not UUID_PATTERN.fullmatch(quiz_id):
+                return {
+                    "error": (
+                        "Invalid Quiz ID format. Paste a Kahoot share/details URL or UUID. "
+                        "A live game PIN is not the same as a Quiz ID."
+                    )
+                }
+
             url = f"{KahootAPI.BASE_API}{quiz_id}"
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -330,6 +349,23 @@ class KahootAPI:
             request = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(request, timeout=10) as response:
                 return json.loads(response.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+
+            if e.code == 400:
+                detail = "Bad request. Kahoot rejected the ID or PIN format."
+                try:
+                    payload = json.loads(body)
+                    detail = payload.get("fields", {}).get("arg1") or payload.get("error") or detail
+                except Exception:
+                    pass
+                return {"error": f"HTTP 400: {detail}"}
+
+            return {"error": f"HTTP Error {e.code}: {e.reason}"}
         except Exception as e:
             return {"error": str(e)}
     
@@ -345,6 +381,26 @@ class KahootAPI:
             with urllib.request.urlopen(request, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
                 return {'quiz_id': data.get('id')}
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+
+            detail = f"HTTP Error {e.code}: {e.reason}"
+            if e.code == 400:
+                try:
+                    payload = json.loads(body)
+                    detail = payload.get("fields", {}).get("arg1") or payload.get("error") or detail
+                except Exception:
+                    pass
+                detail = (
+                    f"HTTP 400: {detail}. This lookup only works for challenge/assignment PINs; "
+                    "live game PINs usually cannot be converted to a Quiz ID by this endpoint."
+                )
+
+            return {"error": detail}
         except Exception as e:
             return {"error": str(e)}
 
@@ -824,20 +880,20 @@ class AnswerViewerTab(QWidget):
         self.loading_overlay.hide()
         self.current_kahoot = kahoot
         
-        details = kahoot.get_quiz_details()
+        quiz_details = kahoot.get_quiz_details()
         
         self.quiz_info.clear()
         
         html_content = f"""
         <div style="font-family: '{ThemeEngine.Fonts.FAMILY_MAIN}', {ThemeEngine.Fonts.FAMILY_FALLBACK};">
-            <h2 style="color: {ThemeEngine.Colors.PUMPKIN}; margin-bottom: 10px;">{details['title']}</h2>
-            <p><b style="color: {ThemeEngine.Colors.PUMPKIN};">Creator:</b> {details['creator_username']}</p>
-            <p><b style="color: {ThemeEngine.Colors.PUMPKIN};">Quiz ID:</b> {details['uuid']}</p>
-            <p><b style="color: {ThemeEngine.Colors.PUMPKIN};">Questions:</b> {details['question_count']}</p>
+            <h2 style="color: {ThemeEngine.Colors.PUMPKIN}; margin-bottom: 10px;">{quiz_details['title']}</h2>
+            <p><b style="color: {ThemeEngine.Colors.PUMPKIN};">Creator:</b> {quiz_details['creator_username']}</p>
+            <p><b style="color: {ThemeEngine.Colors.PUMPKIN};">Quiz ID:</b> {quiz_details['uuid']}</p>
+            <p><b style="color: {ThemeEngine.Colors.PUMPKIN};">Questions:</b> {quiz_details['question_count']}</p>
         """
         
-        if details['description']:
-            html_content += f"<p><b style='color: {ThemeEngine.Colors.PUMPKIN};'>Description:</b> {details['description']}</p>"
+        if quiz_details['description']:
+            html_content += f"<p><b style='color: {ThemeEngine.Colors.PUMPKIN};'>Description:</b> {quiz_details['description']}</p>"
         
         html_content += "</div>"
         
@@ -846,9 +902,9 @@ class AnswerViewerTab(QWidget):
         self.table.setRowCount(0)
         
         for i in range(kahoot.get_quiz_length()):
-            details = kahoot.get_question_details(i)
+            question_details = kahoot.get_question_details(i)
             
-            if details["type"] == "content":
+            if question_details["type"] == "content":
                 continue
             
             row = self.table.rowCount()
@@ -858,7 +914,7 @@ class AnswerViewerTab(QWidget):
             number_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row, 0, number_item)
             
-            question_item = QTableWidgetItem(details["question"])
+            question_item = QTableWidgetItem(question_details["question"])
             self.table.setItem(row, 1, question_item)
             
             answers = kahoot.get_answer(i)
@@ -882,7 +938,7 @@ class AnswerViewerTab(QWidget):
         QMessageBox.information(
             self,
             "Quiz Loaded",
-            f"Successfully loaded quiz: {details['title']}",
+            f"Successfully loaded quiz: {quiz_details['title']}",
             QMessageBox.Ok
         )
     
